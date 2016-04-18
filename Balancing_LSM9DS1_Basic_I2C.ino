@@ -53,7 +53,7 @@ LSM9DS1 imu;
 static float kp = 23.00f;
 static float kd = 950.00f;
 
-static float ki = 0.7f;
+static float ki = 0.0f;
 
 uint32_t _prev = millis();
 
@@ -76,6 +76,8 @@ struct Motor {
   float LOutput;
   float ROutput;
 } motor_t;
+
+static bool system_running = false;
 
 
 //http://www.pieter-jan.com
@@ -121,11 +123,49 @@ void setup()
   imu.settings.device.mAddress = LSM9DS1_M;
   imu.settings.device.agAddress = LSM9DS1_AG;
 
-  imu.settings.accel.scale = A_SCALE_2G;
-  imu.settings.accel.sampleRate = 4;
+  imu.settings.mag.enabled = false; // Enable magnetometer
 
+  imu.settings.accel.scale = A_SCALE_2G;
+  imu.settings.accel.sampleRate = 1;
+
+    // [enabled] turns the acclerometer on or off.
+  imu.settings.accel.enabled = true; // Enable accelerometer
+  // [enableX], [enableY], and [enableZ] can turn on or off
+  // select axes of the acclerometer.
+  imu.settings.accel.enableX = true; // Enable X
+  imu.settings.accel.enableY = true; // Enable Y
+  imu.settings.accel.enableZ = true; // Enable Z
+
+
+
+  imu.settings.accel.bandwidth = 0; // BW = 408Hz
+  // [highResEnable] enables or disables high resolution 
+  // mode for the acclerometer.
+  imu.settings.accel.highResEnable = true; // Disable HR
+  // [highResBandwidth] sets the LP cutoff frequency of
+  // the accelerometer if it's in high-res mode.
+  // can be any value between 0-3
+  // LP cutoff is set to a factor of sample rate
+  // 0 = ODR/50    2 = ODR/9
+  // 1 = ODR/100   3 = ODR/400
+  imu.settings.accel.highResBandwidth = 0;
   imu.settings.gyro.scale = G_SCALE_2000DPS;
   imu.settings.gyro.sampleRate = 4;
+
+  imu.settings.gyro.bandwidth = 0;
+
+  // [lowPowerEnable] turns low-power mode on or off.
+  imu.settings.gyro.lowPowerEnable = false; // LP mode off
+  // [HPFEnable] enables or disables the high-pass filter
+  imu.settings.gyro.HPFEnable = false; // HPF disabled
+  // [HPFCutoff] sets the HPF cutoff frequency (if enabled)
+  // Allowable values are 0-9. Value depends on ODR.
+  // (Datasheet section 7.14)
+  imu.settings.gyro.HPFCutoff = 1; // HPF cutoff = 4Hz
+
+  imu.settings.gyro.flipX = false; // Don't flip X
+  imu.settings.gyro.flipY = false; // Don't flip Y
+  imu.settings.gyro.flipZ = false; // Don't flip Z
 
   Serial.println("START IMU");
   if (!imu.begin())
@@ -152,13 +192,14 @@ void setup()
   pinMode(TN4, OUTPUT);
   pinMode(ENA, OUTPUT);
   pinMode(ENB, OUTPUT);
+  system_running = true;
    _prev = millis();
 }
 
 void loop() {
   static Motor motor;
   static float pitch_value_filtered;
-  if (millis() - _prev > dt * 1000 ) {
+  if (system_running && millis() - _prev > (dt * 1000) ) {
     _prev = millis();
     //   If angle > 45 or < -45 then stop the robot
     readIMUSensor(&pitch_value_filtered);
@@ -168,6 +209,7 @@ void loop() {
     }
     else
     {
+      system_running = false;
       //TODO:// set zero when robot down.
           //  Output = error = errSum = dErr = 0;
       // Serial.println("STOP");
@@ -238,18 +280,23 @@ void readIMUSensor(float *pitch_value_filtered) {
   short gyrData[3];
 
   // CurieImu.getMotion6(&accData[0], &accData[1], &accData[2], &gyrData[0], &gyrData[1], &gyrData[2]);
+  while(!imu.accelAvailable());
   imu.readAccel();
-  imu.readGyro();
-  accData[0] = imu.ax;
-  accData[1] = imu.ay;
-  accData[2] = imu.az;
 
-  gyrData[0] = imu.gx;
-  gyrData[1] = imu.gy;
-  gyrData[2] = imu.gz;
+  while(!imu.gyroAvailable());
+  imu.readGyro();
+
+  accData[0] = imu.calcAccel(imu.ax);
+  accData[1] = imu.calcAccel(imu.ay);
+  accData[2] = imu.calcAccel(imu.az);
+
+  gyrData[0] = (imu.gx);
+  gyrData[1] = (imu.gy);
+  gyrData[2] = (imu.gz);
 
 
   ComplementaryFilter(accData, gyrData, &pitch, &roll);
 
   *pitch_value_filtered = pitch;
+  Serial.println(pitch);
 }
