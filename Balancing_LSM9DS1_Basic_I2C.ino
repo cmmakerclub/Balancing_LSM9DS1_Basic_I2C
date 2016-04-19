@@ -59,13 +59,14 @@ uint32_t _prev = millis();
 
 static uint32_t lastTime = millis();
 
-// int TN1 = 4;
-int TN1 = 10;
+int TN1 = 4;
 int TN2 = 3;
+
 int ENA = 5;
+
 int TN3 = 8;
-// int TN4 = 7;
-int TN4 = 9;
+int TN4 = 7;
+// int TN4 = 9;
 int ENB = 6;
 
 static float error = 0;  // Proportion
@@ -139,7 +140,7 @@ void setup()
 
 
   imu.settings.accel.bandwidth = 0; // BW = 408Hz
-  // [highResEnable] enables or disables high resolution 
+  // [highResEnable] enables or disables high resolution
   // mode for the acclerometer.
   imu.settings.accel.highResEnable = true; // Disable HR
   // [highResBandwidth] sets the LP cutoff frequency of
