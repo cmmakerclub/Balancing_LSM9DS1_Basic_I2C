@@ -43,6 +43,7 @@ LSM9DS1 imu;
 #define RMotor_offset 40 // The offset of the Motor
 #define LMotor_offset 50 // The offset of the Motor
 
+
 // walkin
 // static float kp = 40.00f;
 // static float kd = 1000.00f;
@@ -62,12 +63,11 @@ static uint32_t lastTime = millis();
 int TN1 = 4;
 int TN2 = 3;
 
-int ENA = 5;
-
 int TN3 = 8;
 int TN4 = 7;
-// int TN4 = 9;
-int ENB = 6;
+
+int ENA = 11;
+int ENB = 12;
 
 static float error = 0;  // Proportion
 static float errSum = 0;
@@ -82,13 +82,13 @@ static bool system_running = false;
 
 
 //http://www.pieter-jan.com
-static void ComplementaryFilter(short accData[3], short gyrData[3], float *pitch, float *roll)
+static void ComplementaryFilter(float accData[3], float gyrData[3], float *pitch, float *roll)
 {
-  float pitchAcc, rollAcc;
+  static float pitchAcc, rollAcc;
 
   // Integrate the gyroscope data -> int(angularSpeed) = angle
   *pitch += ((float)gyrData[0] / GYROSCOPE_SENSITIVITY) * dt; // Angle around the X-axis
-  *roll -= ((float)gyrData[1] / GYROSCOPE_SENSITIVITY) * dt;    // Angle around the Y-axis
+  // *roll -= ((float)gyrData[1] / GYROSCOPE_SENSITIVITY) * dt;    // Angle around the Y-axis
 
   // Compensate for drift with accelerometer data if !bullshit
   // Sensitivity = -2 to 2 G at 16Bit -> 2G = 32768 && 0.5G = 8192
@@ -97,11 +97,11 @@ static void ComplementaryFilter(short accData[3], short gyrData[3], float *pitch
   {
     // Turning around the X axis results in a vector on the Y-axis
     pitchAcc = atan2f((float)accData[1], (float)accData[2]) * 180 / M_PI;
-    *pitch = *pitch * 0.98 + pitchAcc * 0.02;
+    *pitch = *pitch * 0.99 + pitchAcc * 0.01;
 
     // Turning around the Y axis results in a vector on the X-axis
-    rollAcc = atan2f((float)accData[0], (float)accData[2]) * 180 / M_PI;
-    *roll = *roll * 0.98 + rollAcc * 0.02;
+    // rollAcc = atan2f((float)accData[0], (float)accData[2]) * 180 / M_PI;
+    // *roll = *roll * 0.99 + rollAcc * 0.01;
   }
 }
 
@@ -112,6 +112,7 @@ void readIMUSensor(float*);
 
 void setup()
 {
+  pinMode(LED_BUILTIN, OUTPUT);
   // CurieImu.setFullScaleAccelRange(BMI160_ACCEL_RANGE_2G);
   // CurieImu.setFullScaleGyroRange(BMI160_GYRO_RANGE_2000);
   Serial.begin(115200);
@@ -137,12 +138,10 @@ void setup()
   imu.settings.accel.enableY = true; // Enable Y
   imu.settings.accel.enableZ = true; // Enable Z
 
-
-
   imu.settings.accel.bandwidth = 0; // BW = 408Hz
   // [highResEnable] enables or disables high resolution
   // mode for the acclerometer.
-  imu.settings.accel.highResEnable = true; // Disable HR
+  imu.settings.accel.highResEnable = false; // Disable HR
   // [highResBandwidth] sets the LP cutoff frequency of
   // the accelerometer if it's in high-res mode.
   // can be any value between 0-3
@@ -154,7 +153,6 @@ void setup()
   imu.settings.gyro.sampleRate = 4;
 
   imu.settings.gyro.bandwidth = 0;
-
   // [lowPowerEnable] turns low-power mode on or off.
   imu.settings.gyro.lowPowerEnable = false; // LP mode off
   // [HPFEnable] enables or disables the high-pass filter
@@ -184,27 +182,46 @@ void setup()
 
   // the following calibration procedure to work correctly!
   Serial.print("Starting Gyroscope calibration...");
+  digitalWrite(LED_BUILTIN, HIGH);
+  imu.calibrate();
   imu.calibrate(true);
+  digitalWrite(LED_BUILTIN, LOW);
 
   Serial.println(" Done");
+
   pinMode(TN1, OUTPUT);
   pinMode(TN2, OUTPUT);
   pinMode(TN3, OUTPUT);
   pinMode(TN4, OUTPUT);
   pinMode(ENA, OUTPUT);
   pinMode(ENB, OUTPUT);
+
+  delay(100);
+  digitalWrite(LED_BUILTIN, HIGH);
+
+  static bool first_run = true;
+  static float pitch_value_filtered;
+  // while(first_run){
+  //   readIMUSensor(&pitch_value_filtered);
+  //   if (pitch_value_filtered == 0) {
+  //     first_run = false;
+  //     break;
+  //   }
+  // };
   system_running = true;
-   _prev = millis();
+  digitalWrite(LED_BUILTIN, LOW);
+  _prev = millis();
+
 }
 
 void loop() {
   static Motor motor;
   static float pitch_value_filtered;
-  if (system_running && millis() - _prev > (dt * 1000) ) {
+  if (system_running && ((millis() - _prev) > 10)){
+    readIMUSensor(&pitch_value_filtered);
     _prev = millis();
     //   If angle > 45 or < -45 then stop the robot
-    readIMUSensor(&pitch_value_filtered);
-    if (abs(pitch_value_filtered) < 45) {
+    if (abs(pitch_value_filtered) < 70) {
       myPID(pitch_value_filtered, &motor);
       PWMControl(motor.LOutput, motor.ROutput);
     }
@@ -234,13 +251,11 @@ void myPID(float filtered_angle, struct Motor *motor) {
 
   motor->LOutput = Output;
   motor->ROutput = Output;
-
 }
 
 void PWMControl(float LOutput, float ROutput)
 {
-  if (LOutput > 0)
-  {
+  if (LOutput > 0) {
     digitalWrite(TN1, 0);
     digitalWrite(TN2, 1);
   }
@@ -248,14 +263,12 @@ void PWMControl(float LOutput, float ROutput)
   {
     digitalWrite(TN1, 1);
     digitalWrite(TN2, 0);
-  }
-  else
+  } else
   {
     digitalWrite(ENA, 0);
   }
 
-  if (ROutput > 0)
-  {
+  if (ROutput > 0) {
     digitalWrite(TN3, 1);
     digitalWrite(TN4, 0);
   }
@@ -264,8 +277,7 @@ void PWMControl(float LOutput, float ROutput)
     digitalWrite(TN3, 0);
     digitalWrite(TN4, 1);
   }
-  else
-  {
+  else {
     digitalWrite(ENB, 0);
   }
 
@@ -277,19 +289,28 @@ void readIMUSensor(float *pitch_value_filtered) {
   static float roll;
   static float pitch;
   // put your main code here, to run repeatedly:
-  short accData[3];
-  short gyrData[3];
+  static float accData[3];
+  static float gyrData[3];
 
   // CurieImu.getMotion6(&accData[0], &accData[1], &accData[2], &gyrData[0], &gyrData[1], &gyrData[2]);
-  while(!imu.accelAvailable());
+  // while(!imu.accelAvailable());
   imu.readAccel();
 
-  while(!imu.gyroAvailable());
+  // while(!imu.gyroAvailable());
   imu.readGyro();
 
-  accData[0] = imu.calcAccel(imu.ax);
-  accData[1] = imu.calcAccel(imu.ay);
-  accData[2] = imu.calcAccel(imu.az);
+  accData[0] = (imu.ay);
+  accData[1] = (imu.ax);
+  // accData[2] = (imu.az);
+  // Serial.print("A: ");
+  // // If you want to print calculated values, you can use the
+  // // calcAccel helper function to convert a raw ADC value to
+  // // g's. Give the function the value that you want to convert.
+  // Serial.print((imu.ax));
+  // Serial.print(", ");
+  // Serial.print((imu.ay));
+  // Serial.print(", ");
+  // Serial.println((imu.az));
 
   gyrData[0] = (imu.gx);
   gyrData[1] = (imu.gy);
