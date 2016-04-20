@@ -40,8 +40,8 @@ LSM9DS1 imu;
 #define M_PI 3.14159265359
 #define dt (10.0/1000.0)             // 100hz = 10ms
 
-#define RMotor_offset 40 // The offset of the Motor
-#define LMotor_offset 50 // The offset of the Motor
+#define RMotor_offset 0 // The offset of the Motor
+#define LMotor_offset 10 // The offset of the Motor
 
 
 // walkin
@@ -51,8 +51,11 @@ LSM9DS1 imu;
 // static float kp = 40.00f;
 // static float kd = 600.00f;
 
-static float kp = 23.00f;
-static float kd = 950.00f;
+// static float kp = 23.00f;
+// static float kd = 950.00f;
+
+static float kp = 20.00f;
+static float kd = 800.00f;
 
 static float ki = 0.0f;
 
@@ -74,8 +77,7 @@ static float errSum = 0;
 static float dErr = 0;
 
 struct Motor {
-  float LOutput;
-  float ROutput;
+  float Output;
 } motor_t;
 
 static bool system_running = false;
@@ -88,7 +90,7 @@ static void ComplementaryFilter(float accData[3], float gyrData[3], float *pitch
 
   // Integrate the gyroscope data -> int(angularSpeed) = angle
   *pitch += ((float)gyrData[0] / GYROSCOPE_SENSITIVITY) * dt; // Angle around the X-axis
-  // *roll -= ((float)gyrData[1] / GYROSCOPE_SENSITIVITY) * dt;    // Angle around the Y-axis
+  *roll -= ((float)gyrData[1] / GYROSCOPE_SENSITIVITY) * dt;    // Angle around the Y-axis
 
   // Compensate for drift with accelerometer data if !bullshit
   // Sensitivity = -2 to 2 G at 16Bit -> 2G = 32768 && 0.5G = 8192
@@ -97,15 +99,15 @@ static void ComplementaryFilter(float accData[3], float gyrData[3], float *pitch
   {
     // Turning around the X axis results in a vector on the Y-axis
     pitchAcc = atan2f((float)accData[1], (float)accData[2]) * 180 / M_PI;
-    *pitch = *pitch * 0.99 + pitchAcc * 0.01;
+    *pitch = *pitch * 0.8 + pitchAcc * 0.2;
 
     // Turning around the Y axis results in a vector on the X-axis
     // rollAcc = atan2f((float)accData[0], (float)accData[2]) * 180 / M_PI;
-    // *roll = *roll * 0.99 + rollAcc * 0.01;
+    // *roll = *roll * 0.9 + rollAcc * 0.1;
   }
 }
 
-void PWMControl(float LOutput, float ROutput);
+void PWMControl(float Output);
 void myPID(float filtered_angle, struct Motor *motor);
 void readIMUSensor(float*);
 
@@ -127,7 +129,7 @@ void setup()
 
   imu.settings.mag.enabled = false; // Enable magnetometer
 
-  imu.settings.accel.scale = A_SCALE_2G;
+  imu.settings.accel.scale = A_SCALE_8G;
   imu.settings.accel.sampleRate = 1;
 
     // [enabled] turns the acclerometer on or off.
@@ -141,7 +143,7 @@ void setup()
   imu.settings.accel.bandwidth = 0; // BW = 408Hz
   // [highResEnable] enables or disables high resolution
   // mode for the acclerometer.
-  imu.settings.accel.highResEnable = false; // Disable HR
+  imu.settings.accel.highResEnable = true; // Disable HR
   // [highResBandwidth] sets the LP cutoff frequency of
   // the accelerometer if it's in high-res mode.
   // can be any value between 0-3
@@ -156,7 +158,7 @@ void setup()
   // [lowPowerEnable] turns low-power mode on or off.
   imu.settings.gyro.lowPowerEnable = false; // LP mode off
   // [HPFEnable] enables or disables the high-pass filter
-  imu.settings.gyro.HPFEnable = false; // HPF disabled
+  imu.settings.gyro.HPFEnable = true; // HPF disabled
   // [HPFCutoff] sets the HPF cutoff frequency (if enabled)
   // Allowable values are 0-9. Value depends on ODR.
   // (Datasheet section 7.14)
@@ -212,18 +214,25 @@ void setup()
   digitalWrite(LED_BUILTIN, LOW);
   _prev = millis();
 
+  // while(true) {
+  //   forward();
+  //   delay(500);
+  // //   backward();
+  // //   delay(500);
+  // }
+  // //
 }
 
 void loop() {
   static Motor motor;
   static float pitch_value_filtered;
+  readIMUSensor(&pitch_value_filtered);
   if (system_running && ((millis() - _prev) > 10)){
-    readIMUSensor(&pitch_value_filtered);
     _prev = millis();
     //   If angle > 45 or < -45 then stop the robot
-    if (abs(pitch_value_filtered) < 70) {
+    if (abs(pitch_value_filtered) < 300) {
       myPID(pitch_value_filtered, &motor);
-      PWMControl(motor.LOutput, motor.ROutput);
+      PWMControl(motor.Output);
     }
     else
     {
@@ -239,8 +248,8 @@ void loop() {
 
 void myPID(float filtered_angle, struct Motor *motor) {
   static float lastErr = 0;
-  uint32_t timeChange = (millis() - lastTime);
   static float Output;
+  uint32_t timeChange = (millis() - lastTime);
   lastTime = millis();
 
   error = filtered_angle;  // Proportion
@@ -249,76 +258,74 @@ void myPID(float filtered_angle, struct Motor *motor) {
   Output = kp * error + ki * errSum + kd * dErr;
   lastErr = error;
 
-  motor->LOutput = Output;
-  motor->ROutput = Output;
+  motor->Output = Output;
 }
 
-void PWMControl(float LOutput, float ROutput)
-{
-  if (LOutput > 0) {
-    digitalWrite(TN1, 0);
-    digitalWrite(TN2, 1);
-  }
-  else if (LOutput < 0)
-  {
+void backward() {
     digitalWrite(TN1, 1);
     digitalWrite(TN2, 0);
-  } else
-  {
-    digitalWrite(ENA, 0);
-  }
 
-  if (ROutput > 0) {
-    digitalWrite(TN3, 1);
-    digitalWrite(TN4, 0);
-  }
-  else if (ROutput < 0)
-  {
     digitalWrite(TN3, 0);
     digitalWrite(TN4, 1);
+
+    analogWrite(ENA, 255);
+    analogWrite(ENB, 255);
+}
+
+void forward() {
+    digitalWrite(TN1, 0);
+    digitalWrite(TN2, 1);
+
+    digitalWrite(TN3, 1);
+    digitalWrite(TN4, 0);
+
+    analogWrite(ENA, 255);
+    analogWrite(ENB, 255);
+}
+
+void PWMControl(float Output)
+{
+  if (Output > 0) {
+    forward();
   }
-  else {
+  else if (Output < 0)
+  {
+    backward();
+  } else {
+    digitalWrite(ENA, 0);
     digitalWrite(ENB, 0);
   }
 
-  analogWrite(ENA, min(255, (abs(LOutput) + LMotor_offset)));
-  analogWrite(ENB, min(255, (abs(ROutput) + RMotor_offset)));
+  analogWrite(ENA, min(255, (abs(Output) + LMotor_offset)));
+  analogWrite(ENB, min(255, (abs(Output) + RMotor_offset)));
 }
 
 void readIMUSensor(float *pitch_value_filtered) {
   static float roll;
   static float pitch;
-  // put your main code here, to run repeatedly:
+
   static float accData[3];
   static float gyrData[3];
 
   // CurieImu.getMotion6(&accData[0], &accData[1], &accData[2], &gyrData[0], &gyrData[1], &gyrData[2]);
-  // while(!imu.accelAvailable());
+  while(!imu.accelAvailable());
   imu.readAccel();
 
-  // while(!imu.gyroAvailable());
+  while(!imu.gyroAvailable());
   imu.readGyro();
 
-  accData[0] = (imu.ay);
-  accData[1] = (imu.ax);
-  // accData[2] = (imu.az);
-  // Serial.print("A: ");
-  // // If you want to print calculated values, you can use the
-  // // calcAccel helper function to convert a raw ADC value to
-  // // g's. Give the function the value that you want to convert.
-  // Serial.print((imu.ax));
-  // Serial.print(", ");
-  // Serial.print((imu.ay));
-  // Serial.print(", ");
-  // Serial.println((imu.az));
+  accData[0] = (imu.ax);
+  accData[1] = (imu.ay);
 
   gyrData[0] = (imu.gx);
   gyrData[1] = (imu.gy);
   gyrData[2] = (imu.gz);
 
-
   ComplementaryFilter(accData, gyrData, &pitch, &roll);
-
   *pitch_value_filtered = pitch;
-  Serial.println(pitch);
+
+  if (system_running) {
+    Serial.println(pitch);
+  }
+  
 }
