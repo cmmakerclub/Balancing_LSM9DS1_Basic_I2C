@@ -40,8 +40,8 @@ LSM9DS1 imu;
 #define M_PI 3.14159265359
 #define dt (10.0/1000.0)             // 100hz = 10ms
 
-#define RMotor_offset 0 // The offset of the Motor
-#define LMotor_offset 10 // The offset of the Motor
+#define RMotor_offset 30 // The offset of the Motor
+#define LMotor_offset 35 // The offset of the Motor
 
 
 // walkin
@@ -54,7 +54,7 @@ LSM9DS1 imu;
 // static float kp = 23.00f;
 // static float kd = 950.00f;
 
-static float kp = 20.00f;
+static float kp = 10.00f;
 static float kd = 800.00f;
 
 static float ki = 0.0f;
@@ -129,7 +129,7 @@ void setup()
 
   imu.settings.mag.enabled = false; // Enable magnetometer
 
-  imu.settings.accel.scale = A_SCALE_8G;
+  imu.settings.accel.scale = A_SCALE_2G;
   imu.settings.accel.sampleRate = 1;
 
     // [enabled] turns the acclerometer on or off.
@@ -325,7 +325,7 @@ void readIMUSensor(float *pitch_value_filtered) {
   *pitch_value_filtered = pitch;
 
   if (system_running) {
-    Serial.println(pitch);
+    // Serial.println(pitch);
   }
-  
+
 }
