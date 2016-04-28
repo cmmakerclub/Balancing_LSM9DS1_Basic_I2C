@@ -40,8 +40,9 @@ LSM9DS1 imu;
 #define M_PI 3.14159265359
 #define dt (10.0/1000.0)             // 100hz = 10ms
 
-#define RMotor_offset 30 // The offset of the Motor
-#define LMotor_offset 35 // The offset of the Motor
+#define RMotor_offset 50 // The offset of the Motor
+#define LMotor_offset 65 // The offset of the Motor
+
 
 
 // walkin
@@ -54,39 +55,42 @@ LSM9DS1 imu;
 // static float kp = 23.00f;
 // static float kd = 950.00f;
 
-static float kp = 10.00f;
-static float kd = 800.00f;
+float kp;
+float kd;
+float ki = 0.0f;
 
-static float ki = 0.0f;
-
+bool flag = false;
 uint32_t _prev = millis();
 
-static uint32_t lastTime = millis();
+uint32_t lastTime = millis();
 
-int TN1 = 4;
-int TN2 = 3;
+int TN1 = 8;
+int TN2 = 7;
 
-int TN3 = 8;
-int TN4 = 7;
+int TN3 = 4;
+int TN4 = 3;
 
 int ENA = 11;
 int ENB = 12;
 
-static float error = 0;  // Proportion
-static float errSum = 0;
-static float dErr = 0;
+float error = 0;  // Proportion
+float errSum = 0;
+float dErr = 0;
+
+float lastErr = 0;
+float Output;
 
 struct Motor {
   float Output;
 } motor_t;
 
-static bool system_running = false;
+bool system_running = false;
 
 
 //http://www.pieter-jan.com
-static void ComplementaryFilter(float accData[3], float gyrData[3], float *pitch, float *roll)
+void ComplementaryFilter(float accData[3], float gyrData[3], float *pitch, float *roll)
 {
-  static float pitchAcc, rollAcc;
+  float pitchAcc, rollAcc;
 
   // Integrate the gyroscope data -> int(angularSpeed) = angle
   *pitch += ((float)gyrData[0] / GYROSCOPE_SENSITIVITY) * dt; // Angle around the X-axis
@@ -98,11 +102,13 @@ static void ComplementaryFilter(float accData[3], float gyrData[3], float *pitch
   if (forceMagnitudeApprox > 8192 && forceMagnitudeApprox < 32768)
   {
     // Turning around the X axis results in a vector on the Y-axis
-    pitchAcc = atan2f((float)accData[1], (float)accData[2]) * 180 / M_PI;
-    *pitch = *pitch * 0.8 + pitchAcc * 0.2;
+    // 180/PI = 57.29577951307855
+    pitchAcc = atan2f((float)accData[1], (float)accData[2]) * 57.29577951307855;
+    *pitch = (*pitch * 0.99) + (pitchAcc * 0.01);
+    // Serial.println(pitchAcc);
 
     // Turning around the Y axis results in a vector on the X-axis
-    // rollAcc = atan2f((float)accData[0], (float)accData[2]) * 180 / M_PI;
+    // rollAcc = atan2f((float)accData[0], (float)ac9Data[2]) * 180 / M_PI;
     // *roll = *roll * 0.9 + rollAcc * 0.1;
   }
 }
@@ -119,6 +125,8 @@ void setup()
   // CurieImu.setFullScaleGyroRange(BMI160_GYRO_RANGE_2000);
   Serial.begin(115200);
 
+  kp = (float)map(analogRead(A0), 0, 1024, 0, 200);
+  kd = (float)map(analogRead(A1), 0, 1024, 100, 10000);
   // Before initializing the IMU, there are a few settings
   // we may need to adjust. Use the settings struct to set
   // the device's communication mode and addresses:
@@ -129,36 +137,38 @@ void setup()
 
   imu.settings.mag.enabled = false; // Enable magnetometer
 
+  imu.settings.accel.enabled = true; // Enable accelerometer
   imu.settings.accel.scale = A_SCALE_2G;
   imu.settings.accel.sampleRate = 1;
 
-    // [enabled] turns the acclerometer on or off.
-  imu.settings.accel.enabled = true; // Enable accelerometer
+  // [enabled] turns the acclerometer on or off.
   // [enableX], [enableY], and [enableZ] can turn on or off
   // select axes of the acclerometer.
   imu.settings.accel.enableX = true; // Enable X
   imu.settings.accel.enableY = true; // Enable Y
   imu.settings.accel.enableZ = true; // Enable Z
 
-  imu.settings.accel.bandwidth = 0; // BW = 408Hz
+//  imu.settings.accel.bandwidth = 0; // BW = 408Hz
   // [highResEnable] enables or disables high resolution
   // mode for the acclerometer.
-  imu.settings.accel.highResEnable = true; // Disable HR
+  imu.settings.accel.highResEnable = false; // Disable HR
   // [highResBandwidth] sets the LP cutoff frequency of
   // the accelerometer if it's in high-res mode.
   // can be any value between 0-3
   // LP cutoff is set to a factor of sample rate
   // 0 = ODR/50    2 = ODR/9
   // 1 = ODR/100   3 = ODR/400
-  imu.settings.accel.highResBandwidth = 0;
+  imu.settings.accel.highResBandwidth = 3;
+
+  //GYRO
   imu.settings.gyro.scale = G_SCALE_2000DPS;
   imu.settings.gyro.sampleRate = 4;
 
-  imu.settings.gyro.bandwidth = 0;
+  // imu.settings.gyro.bandwidth = 0;
   // [lowPowerEnable] turns low-power mode on or off.
   imu.settings.gyro.lowPowerEnable = false; // LP mode off
   // [HPFEnable] enables or disables the high-pass filter
-  imu.settings.gyro.HPFEnable = true; // HPF disabled
+  imu.settings.gyro.HPFEnable = false; // HPF disabled
   // [HPFCutoff] sets the HPF cutoff frequency (if enabled)
   // Allowable values are 0-9. Value depends on ODR.
   // (Datasheet section 7.14)
@@ -167,7 +177,6 @@ void setup()
   imu.settings.gyro.flipX = false; // Don't flip X
   imu.settings.gyro.flipY = false; // Don't flip Y
   imu.settings.gyro.flipZ = false; // Don't flip Z
-
   Serial.println("START IMU");
   if (!imu.begin())
   {
@@ -185,8 +194,8 @@ void setup()
   // the following calibration procedure to work correctly!
   Serial.print("Starting Gyroscope calibration...");
   digitalWrite(LED_BUILTIN, HIGH);
-  imu.calibrate();
-  imu.calibrate(true);
+  // imu.calibrate();
+  // imu.calibrate(true);
   digitalWrite(LED_BUILTIN, LOW);
 
   Serial.println(" Done");
@@ -198,19 +207,21 @@ void setup()
   pinMode(ENA, OUTPUT);
   pinMode(ENB, OUTPUT);
 
-  delay(100);
   digitalWrite(LED_BUILTIN, HIGH);
+  delay(100);
+  delay(200);
+  digitalWrite(LED_BUILTIN, LOW);
 
-  static bool first_run = true;
-  static float pitch_value_filtered;
-  // while(first_run){
-  //   readIMUSensor(&pitch_value_filtered);
-  //   if (pitch_value_filtered == 0) {
-  //     first_run = false;
-  //     break;
-  //   }
-  // };
-  system_running = true;
+  while(true){
+    float pitch_value_filtered;
+    readIMUSensor(&pitch_value_filtered);
+    Serial.println(pitch_value_filtered);
+    if (abs(pitch_value_filtered) <= 1) {
+      Serial.println("BREAK");
+      system_running = true;
+      break;
+     }
+  };
   digitalWrite(LED_BUILTIN, LOW);
   _prev = millis();
 
@@ -223,14 +234,43 @@ void setup()
   // //
 }
 
+Motor motor;
+float pitch_value_filtered;
+
 void loop() {
-  static Motor motor;
-  static float pitch_value_filtered;
+
+
+  while (Serial.available() > 0) {
+    char in = Serial.read();
+    flag = !flag;
+  }
+
+  if (flag) {
+    kp = (float)map(analogRead(A0), 0, 1024, 0, 200);
+    kd = (float)map(analogRead(A1), 0, 1024, 100, 10000);
+    // print out the value you read:
+    Serial.print(kp);
+    Serial.print (", ");
+    Serial.println(kd);
+
+    error = 0;  // Proportion
+    errSum = 0;
+    dErr = 0;
+
+    lastErr = 0;
+    Output;
+    digitalWrite(ENA, 0);
+    digitalWrite(ENB, 0);
+    delay(1);
+    return;
+  }
+
+
   readIMUSensor(&pitch_value_filtered);
   if (system_running && ((millis() - _prev) > 10)){
     _prev = millis();
     //   If angle > 45 or < -45 then stop the robot
-    if (abs(pitch_value_filtered) < 300) {
+    if (abs(pitch_value_filtered) < 3000) {
       myPID(pitch_value_filtered, &motor);
       PWMControl(motor.Output);
     }
@@ -247,8 +287,6 @@ void loop() {
 }
 
 void myPID(float filtered_angle, struct Motor *motor) {
-  static float lastErr = 0;
-  static float Output;
   uint32_t timeChange = (millis() - lastTime);
   lastTime = millis();
 
@@ -268,8 +306,6 @@ void backward() {
     digitalWrite(TN3, 0);
     digitalWrite(TN4, 1);
 
-    analogWrite(ENA, 255);
-    analogWrite(ENB, 255);
 }
 
 void forward() {
@@ -278,9 +314,6 @@ void forward() {
 
     digitalWrite(TN3, 1);
     digitalWrite(TN4, 0);
-
-    analogWrite(ENA, 255);
-    analogWrite(ENB, 255);
 }
 
 void PWMControl(float Output)
@@ -308,24 +341,21 @@ void readIMUSensor(float *pitch_value_filtered) {
   static float gyrData[3];
 
   // CurieImu.getMotion6(&accData[0], &accData[1], &accData[2], &gyrData[0], &gyrData[1], &gyrData[2]);
-  while(!imu.accelAvailable());
   imu.readAccel();
-
-  while(!imu.gyroAvailable());
   imu.readGyro();
 
   accData[0] = (imu.ax);
   accData[1] = (imu.ay);
+  accData[2] = (imu.az);
 
   gyrData[0] = (imu.gx);
   gyrData[1] = (imu.gy);
   gyrData[2] = (imu.gz);
 
-  ComplementaryFilter(accData, gyrData, &pitch, &roll);
-  *pitch_value_filtered = pitch;
+  ComplementaryFilter(accData, gyrData, pitch_value_filtered, &roll);
 
   if (system_running) {
-    // Serial.println(pitch);
+    Serial.println(*pitch_value_filtered);
   }
 
 }
